@@ -9,7 +9,7 @@ import sys
 
 # Considers the repeated samples
 class ActiveLearner():
-    def __init__(self, Q, K, n_queries, initial_size, quantiles, batch_size, device, key, B):
+    def __init__(self, Q, K, n_queries, initial_size, quantiles, batch_size, device, key, B, model_size):
         self.n_queries = n_queries
         self.Q = Q
         self.K = K
@@ -19,7 +19,7 @@ class ActiveLearner():
         self.device = device
         self.key = key
         self.B = B
-        
+        self.model_size = model_size
     
     # A single AL experiment:
     def al_iterations(self, data_loader, X_train, X_test, y_train, y_test, seed_initial, seed_rf, evaluator, calculator, seed_QBC_model, seed_QBC_bootstrap):
@@ -141,6 +141,15 @@ class ActiveLearner():
                     count_batch += 1
             if count_batch < self.B:
                 continue
+
+            # acquisition_model = None
+            if self.key == "LCMD":
+                acquisition_model = self.fit_virtual_ensemble_acquisition_model(
+                    used_data,
+                    used_label,
+                    seed_rf,
+                    n_ensemble=20,
+                )
             
             if self.key == "Random":  # Random Sampling Baseline
                 # Random Selection of B batch: batch indices
@@ -192,8 +201,10 @@ class ActiveLearner():
                             query_idx, top_k = self.custom_query_strategy_greedy_GSx(sys[unlabeled_index], unlabeled_index, used_data, used_label, self.batch_size)
                         elif self.key == 'QBC':
                             query_idx, top_k = self.query_QBC(sys[unlabeled_index], member_list, self.batch_size)
+                        elif self.key == 'LCMD':
+                            query_idx, top_k = self.query_LCMD(acquisition_model, sys[unlabeled_index], used_data, self.batch_size)
                         else:
-                            assert self.key in ["Greedy-iGS", "Greedy-GSx", "QBC", "Random", "Greedy-GSy"], 'The comparisions methods keywords can only be "Random", "Greedy-iGS", "Greedy-GSx", "Greedy-GSy" or "QBC".'
+                            assert self.key in ["Greedy-iGS", "Greedy-GSx", "QBC", "Random", "Greedy-GSy", "LCMD"], 'The comparisions methods keywords can only be "Random", "Greedy-iGS", "Greedy-GSx", "Greedy-GSy", "QBC" or "LCMD".'
                         
                         # These for lists have the same dimension
                         top_all_utility_all.append(top_k)
@@ -229,7 +240,7 @@ class ActiveLearner():
                     print("Queried samples:", np.unique(used_data, axis=0).shape[0])
             
             # For these two methods, return the indices of the selected samples within the batch
-            if self.key == "Greedy-iGS" or self.key == "Greedy-GSy" or self.key == "QBC":
+            if self.key == "Greedy-iGS" or self.key == "Greedy-GSy" or self.key == "QBC" or self.key == "LCMD":
                 for id_s in max_sys_idx:
                     # Selected sys_list index
                     top_index = top_indices_list[id_s]
@@ -362,6 +373,168 @@ class ActiveLearner():
         selected_indices = self.multi_argmax(utility, n_instances=al_batch_size)
         top_k = utility[selected_indices]
         return selected_indices, top_k
+
+    
+    def fit_virtual_ensemble_acquisition_model(self, used_data, used_label, random_state, n_ensemble=20):
+        quantile_str = ",".join([str(q) for q in self.quantiles])
+        loss_fn = f"MultiQuantile:alpha={quantile_str}"
+    
+        acquisition_model = CatBoostRegressor(
+            iterations=self.model_size,
+            loss_function=loss_fn,
+            posterior_sampling=True,
+            best_model_min_trees=n_ensemble,
+            random_state=random_state,
+            verbose=0,
+        )
+        acquisition_model.fit(used_data, used_label.ravel(),
+                              callbacks=[CustomEarlyStopCallback(loss_fn)])
+        return acquisition_model
+
+    
+    def _virtual_ensemble_median_features(self, model, X, n_ensemble=20):
+        if X.shape[0] == 0:
+            return np.empty((0, n_ensemble), dtype=np.float64)
+        if not hasattr(model, "virtual_ensembles_predict"):
+            raise AttributeError("LCMD require a CatBoost model with virtual_ensembles_predict().")
+
+        q_idx = self.quantiles.index(0.5)
+        n_samples = X.shape[0]
+
+        from catboost import CatboostError
+        ensemble_count = n_ensemble
+        while True:
+            assert ensemble_count > 1, (
+                f"virtual_ensembles_predict failed: ensemble_count reduced to {ensemble_count}, "
+                f"not enough trees in the model."
+            )
+            try:
+                raw = np.asarray(
+                    model.virtual_ensembles_predict(X, virtual_ensembles_count=ensemble_count),
+                    dtype=np.float64,
+                )
+                break
+            except CatboostError as e:
+                if "Not enough trees in model" in str(e):
+                    ensemble_count //= 2
+                    print(f"Not enough trees, retrying with ensemble_count={ensemble_count}")
+                else:
+                    raise
+
+        if raw.ndim == 3:
+            if raw.shape[0] == n_samples and raw.shape[1] == ensemble_count:
+                member_medians = raw[:, :, q_idx]
+            elif raw.shape[0] == ensemble_count and raw.shape[1] == n_samples:
+                member_medians = raw[:, :, q_idx].T
+            else:
+                raise ValueError(
+                    f"Unexpected virtual ensemble prediction shape: {raw.shape}. "
+                    f"Expected ({n_samples}, {ensemble_count}, Q) or ({ensemble_count}, {n_samples}, Q)."
+                )
+        elif raw.ndim == 2:
+            if raw.shape == (n_samples, ensemble_count):
+                member_medians = raw
+            elif raw.shape == (ensemble_count, n_samples):
+                member_medians = raw.T
+            else:
+                raise ValueError(
+                    f"Unexpected virtual ensemble prediction shape: {raw.shape}. "
+                    f"Expected ({n_samples}, {ensemble_count}) or ({ensemble_count}, {n_samples})."
+                )
+        else:
+            raise ValueError(f"Unexpected virtual ensemble prediction ndim={raw.ndim}.")
+
+        # Center per sample, scale by 1/sqrt(actual ensemble_count used)
+        features = member_medians - member_medians.mean(axis=1, keepdims=True)
+        return features / np.sqrt(ensemble_count)
+
+
+    def _lcmd_core(self, pool_features, train_features, n_instances,
+                   sel_with_train=True, dist_weight_mode='sq-dist'):
+
+        n_pool = pool_features.shape[0]
+        all_indices = np.arange(n_pool)
+
+        min_sq_dists = np.full(n_pool, np.inf, dtype=np.float64)
+        closest_idxs = np.zeros(n_pool, dtype=int)
+        selected_indices = []
+        acq_values = []
+        n_added = 0
+
+        def add_center(center):
+            nonlocal min_sq_dists, closest_idxs, n_added
+            sq_dists = np.sum((pool_features - center) ** 2, axis=1)
+            n_added += 1
+            new_min = sq_dists < min_sq_dists
+            closest_idxs[new_min] = n_added
+            min_sq_dists[new_min] = sq_dists[new_min]
+
+        # TP mode: seed Voronoi with all labeled samples first
+        if sel_with_train and train_features.shape[0] > 0:
+            for train_center in train_features:
+                add_center(train_center)
+
+        # used for the first selection
+        pool_diag = np.sum(pool_features ** 2, axis=1)
+
+        for _ in range(n_instances):
+            if len(selected_indices) == 0:
+                # First selection:
+                scores = pool_diag.copy()
+            else:
+                # Compute cluster weights
+                if dist_weight_mode == 'sq-dist':
+                    weights = min_sq_dists.copy()
+                elif dist_weight_mode == 'dist':
+                    weights = np.sqrt(np.maximum(min_sq_dists, 0.0))
+                else:
+                    weights = None
+
+                bincount = np.bincount(closest_idxs, weights=weights, minlength=n_added + 1)
+                max_bincount = np.max(bincount)
+                # Only samples in the largest cluster are candidates, score = min_sq_dist
+                scores = np.where(bincount[closest_idxs] == max_bincount, min_sq_dists, -np.inf)
+
+            scores = scores.copy()
+            scores[selected_indices] = -np.inf
+            new_idx = int(np.argmax(scores))
+
+            if not np.isfinite(scores[new_idx]):
+                # Fallback: fill ALL remaining slots with random samples and exit immediately.
+                remaining = np.setdiff1d(all_indices, np.asarray(selected_indices, dtype=int),
+                                         assume_unique=False)
+                n_missing = n_instances - len(selected_indices)
+                fill_size = min(n_missing, len(remaining))
+                fill_idxs = np.random.choice(remaining, size=fill_size, replace=False)
+                for fi in fill_idxs:
+                    selected_indices.append(int(fi))
+                    acq_values.append(0.0)
+                break 
+
+            selected_indices.append(new_idx)
+
+            record_score = (float(min_sq_dists[new_idx])
+                            if np.isfinite(min_sq_dists[new_idx])
+                            else float(scores[new_idx]))
+
+            acq_values.append(record_score)
+            add_center(pool_features[new_idx])
+
+        return np.asarray(selected_indices, dtype=int), np.asarray(acq_values, dtype=float)
+    
+
+    def query_LCMD(self, model, X_pool, used_data, n_instances, n_ensemble=20, sel_with_train=True, dist_weight_mode='sq-dist'):
+
+        if n_instances > X_pool.shape[0]:
+            raise ValueError("n_instances cannot be larger than the unlabeled pool size.")
+
+        pool_features  = self._virtual_ensemble_median_features(model, X_pool,   n_ensemble)
+        train_features = self._virtual_ensemble_median_features(model, used_data, n_ensemble)
+
+        return self._lcmd_core(pool_features, train_features, n_instances,
+                               sel_with_train=sel_with_train,
+                               dist_weight_mode=dist_weight_mode)
+
 
 #     source of the multi_argmax function:
 #     @article{modAL2018,
