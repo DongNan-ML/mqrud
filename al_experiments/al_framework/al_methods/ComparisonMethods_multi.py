@@ -40,7 +40,6 @@ class ActiveLearner():
 
         if type(data_loader).__name__ == "SemiConductor":
             X_test = X_test.drop("components", axis='columns')
-            union_set_X = union_set_X.drop("components", axis='columns')
     
         # The feature dimensions:
         X = X_test.shape[1]
@@ -142,7 +141,7 @@ class ActiveLearner():
             if count_batch < self.B:
                 continue
 
-            # acquisition_model = None
+            acquisition_model = None
             if self.key == "LCMD":
                 acquisition_model = self.fit_virtual_ensemble_acquisition_model(
                     used_data,
@@ -248,7 +247,7 @@ class ActiveLearner():
                     top_query_index = top_query_index_list[id_s]
                     # The queried sample indices in the system:
                     sys_index = X_index_list[top_index][top_query_index]
-                    print("Remaining Samples", X_index_list[top_index].shape)
+                    # print("Remaining Samples", X_index_list[top_index].shape)
                     new_X = sys_list[top_index][sys_index]
                     top_labels = label_list[top_index]
                     new_y = top_labels[X_index_list[top_index][top_query_index]].reshape(-1, 1).ravel()
@@ -341,6 +340,23 @@ class ActiveLearner():
     
     
     def custom_query_strategy_greedy_GSx(self, X_pool, unlabeled_index, used_data, used_label, n_instances):
+        # Adapted from the Coreset implementation by Subedi et al. (2024), which follows the Core-Set method of Sener and Savarese (2018).
+        # https://github.com/sronast/al_3dgraph/blob/main/al/selection_methods.py
+        # @article{subedi2024empowering,
+        #         title={Empowering active learning for 3D molecular graphs with geometric graph isomorphism},
+        #         author={Subedi, Ronast and Wei, Lu and Gao, Wenhan and Chakraborty, Shayok and Liu, Yi},
+        #         journal={Advances in Neural Information Processing Systems},
+        #         volume={37},
+        #         pages={55507--55537},
+        #         year={2024}
+        #         }
+
+        # @article{sener2017active,
+        #         title={Active learning for convolutional neural networks: A core-set approach},
+        #         author={Sener, Ozan and Savarese, Silvio},
+        #         journal={In International Conference on Learning Representations},
+        #         year={2018}
+        #         }
 
         selected_indices = []
         top_k = []
@@ -372,9 +388,29 @@ class ActiveLearner():
         utility = np.var(initial_pred, axis=0)
         selected_indices = self.multi_argmax(utility, n_instances=al_batch_size)
         top_k = utility[selected_indices]
-        return selected_indices, top_k
-
+        return selected_indices, top_k    
     
+    # Code for LCMD is adapted from the implementation in the papers:
+
+    #     @article{kirschblack,
+    #       title={Black-Box Batch Active Learning for Regression},
+    #       author={Kirsch, Andreas},
+    #       journal={Transactions on Machine Learning Research},
+    #       year = {2023}
+    #     }
+    # Code: https://github.com/BlackHC/2302.08981
+
+    # @article{holzmuller2023framework,
+    #   title={A framework and benchmark for deep batch active learning for regression},
+    #   author={Holzm{\"u}ller, David and Zaverkin, Viktor and K{\"a}stner, Johannes and Steinwart, Ingo},
+    #   journal={Journal of Machine Learning Research},
+    #   volume={24},
+    #   number={164},
+    #   pages={1--81},
+    #   year={2023}
+    # }
+    # Code: https://github.com/dholzmueller/bmdal_reg
+
     def fit_virtual_ensemble_acquisition_model(self, used_data, used_label, random_state, n_ensemble=20):
         quantile_str = ",".join([str(q) for q in self.quantiles])
         loss_fn = f"MultiQuantile:alpha={quantile_str}"
@@ -451,7 +487,6 @@ class ActiveLearner():
 
     def _lcmd_core(self, pool_features, train_features, n_instances,
                    sel_with_train=True, dist_weight_mode='sq-dist'):
-
         n_pool = pool_features.shape[0]
         all_indices = np.arange(n_pool)
 
@@ -535,23 +570,21 @@ class ActiveLearner():
                                sel_with_train=sel_with_train,
                                dist_weight_mode=dist_weight_mode)
 
-
-#     source of the multi_argmax function:
-#     @article{modAL2018,
-#     title={mod{AL}: {A} modular active learning framework for {P}ython},
-#     author={Tivadar Danka and Peter Horvath},
-#     url={https://github.com/modAL-python/modAL},
-#     note={available on arXiv at \url{https://arxiv.org/abs/1805.00979}}
-# }
     
     def multi_argmax(self, values, n_instances):
-
-        assert n_instances <= values.shape[0], 'n_instances must be less or equal than the size of utility.'
+        #     source of the multi_argmax function:
+        #     @article{modAL2018,
+        #     title={mod{AL}: {A} modular active learning framework for {P}ython},
+        #     author={Tivadar Danka and Peter Horvath},
+        #     url={https://github.com/modAL-python/modAL},
+        #     note={available on arXiv at \url{https://arxiv.org/abs/1805.00979}}
+        # }
+        assert n_instances <= values.shape[0], 'n_instances must be less or equal than the size of utility'
 
         max_idx = np.argpartition(-values, n_instances-1, axis=0)[:n_instances]
         return max_idx
     
-    
+
     def QBC_retrain(self, idx, seed_QBC_bootstrap, member_list, used_data, used_label):
         key_early_stop = "RMSE"
         np.random.seed(seed_QBC_bootstrap[idx+1])

@@ -294,16 +294,15 @@ class ActiveLearner():
         assert len(selected_indices) == n_instances, f"Selected {len(selected_indices)} points, but required {n_instances}"
         
         return selected_indices, sample_acquisition
-
-#     source of the multi_argmax, multi_argmin function:
-#     @article{modAL2018,
-#     title={mod{AL}: {A} modular active learning framework for {P}ython},
-#     author={Tivadar Danka and Peter Horvath},
-#     url={https://github.com/modAL-python/modAL},
-#     note={available on arXiv at \url{https://arxiv.org/abs/1805.00979}}
-# }
     
     def multi_argmax(self, values, n_instances):
+        #     source of the multi_argmax function:
+        #     @article{modAL2018,
+        #     title={mod{AL}: {A} modular active learning framework for {P}ython},
+        #     author={Tivadar Danka and Peter Horvath},
+        #     url={https://github.com/modAL-python/modAL},
+        #     note={available on arXiv at \url{https://arxiv.org/abs/1805.00979}}
+        # }
         assert n_instances <= values.shape[0], 'n_instances must be less or equal than the size of utility'
 
         max_idx = np.argpartition(-values, n_instances-1, axis=0)[:n_instances]
@@ -311,6 +310,13 @@ class ActiveLearner():
 
     
     def multi_argmin(self, values, n_instances):
+        #     source of the multi_argmin function:
+        #     @article{modAL2018,
+        #     title={mod{AL}: {A} modular active learning framework for {P}ython},
+        #     author={Tivadar Danka and Peter Horvath},
+        #     url={https://github.com/modAL-python/modAL},
+        #     note={available on arXiv at \url{https://arxiv.org/abs/1805.00979}}
+        # }
         assert n_instances <= values.shape[0], 'n_instances must be less or equal than the size of values'
         min_idx = np.argpartition(values, n_instances-1, axis=0)[:n_instances]
         return min_idx

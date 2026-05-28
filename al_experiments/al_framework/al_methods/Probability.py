@@ -17,8 +17,8 @@ class Probability():
     def quantile_regression(self, used_data, used_label, seed, x_test, X):
         key = "MultiQuantile:alpha=" + ",".join([str(q) for q in self.quantiles])
         if self.model_type == "Tree":
-            model = CatBoostRegressor(iterations=self.model_size,
-                                    quantiles=self.quantiles, 
+            model = CatBoostRegressor(
+                                    iterations=self.model_size,
                                     loss_function=key,
                                     random_state=seed,
                                     verbose=0)
