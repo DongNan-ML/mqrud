@@ -17,8 +17,10 @@ The code is structured as follows:
 ## License
 The code implementation is licensed under the Apache 2.0 license.
 
-## The black-box LCMD Code
-The baseline LCMD source code can be retrieved from https://github.com/dholzmueller/bmdal_reg, and https://github.com/BlackHC/2302.08981.
+## Comparison Methods Code
+The baseline black-box LCMD source code can be retrieved from https://github.com/dholzmueller/bmdal_reg, and https://github.com/BlackHC/2302.08981.
+
+The baseline GSx code is adapted from https://github.com/sronast/al_3dgraph/blob/main/al/selection_methods.py.
 
 ## Citations: the comparision methods and some utility functions in this repository are from:
 
@@ -59,6 +61,22 @@ The baseline LCMD source code can be retrieved from https://github.com/dholzmuel
   author={Kirsch, Andreas},
   journal={Transactions on Machine Learning Research},
   year={2023}
+}
+
+@article{subedi2024empowering,
+  title={Empowering active learning for 3D molecular graphs with geometric graph isomorphism},
+  author={Subedi, Ronast and Wei, Lu and Gao, Wenhan and Chakraborty, Shayok and Liu, Yi},
+  journal={Advances in Neural Information Processing Systems},
+  volume={37},
+  pages={55507--55537},
+  year={2024}
+}
+
+@article{sener2017active,
+  title={Active learning for convolutional neural networks: A core-set approach},
+  author={Sener, Ozan and Savarese, Silvio},
+  journal={In International Conference on Learning Representations},
+  year={2018}
 }
 
 @article{modAL2018,
