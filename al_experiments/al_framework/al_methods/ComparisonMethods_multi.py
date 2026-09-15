@@ -504,7 +504,7 @@ class ActiveLearner():
             closest_idxs[new_min] = n_added
             min_sq_dists[new_min] = sq_dists[new_min]
 
-        # TP mode: seed Voronoi with all labeled samples first
+        # TP mode: seed the cluster with all labelled samples first
         if sel_with_train and train_features.shape[0] > 0:
             for train_center in train_features:
                 add_center(train_center)

@@ -36,7 +36,6 @@ class ActiveLearner():
 
         if type(data_loader).__name__ == "SemiConductor":
             X_test = X_test.drop("components", axis='columns')
-            union_set_X = union_set_X.drop("components", axis='columns')
     
         # Feature dimensions
         X = X_test.shape[1]
@@ -204,10 +203,11 @@ class ActiveLearner():
                 range_min_value = np.min(sys_preds)
                 range_max_value = np.max(sys_preds)
                 ranges = calculator.get_interval_ranges(K, range_min_value, range_max_value)
+                unlabeled_preds = sys_preds[X_index_list[sys_idx]]
                 
                 # Each sample in the system:
                 for i in range(each_system.shape[0]):
-                    prob_original = calculator.get_predictive_distribution(sys_preds[i, ], Q, K, ranges, range_max_value)
+                    prob_original = calculator.get_predictive_distribution(unlabeled_preds[i, ], Q, K, ranges, range_max_value)
                     if metric == "EP":
                         utility.append(entropy(prob_original))
                         
